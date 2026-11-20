@@ -4,6 +4,26 @@ A photo and video editor that runs **only in your browser**. Your files are neve
 
 **Try it:** https://danielromer-droid.github.io/VivEditor/
 
+## Photo editor (`photo.html`)
+
+Open a photo (or start with a blank picture), then:
+
+- **Layers:** add photos (+ Photo, drag and drop or paste) and empty layers. Each layer has a **blend mode** (Multiply, Screen, Overlay, Soft light…) and an **opacity**. Show/hide with the eye, drag order with ↑ ↓, double-click to rename.
+- **Move tool (V):** drag to move, corners to resize, round handle to rotate. Exact numbers, flip and 90° turns are in the Properties panel.
+- **Crop (C):** drag the area to keep, then *Apply crop* (or Enter).
+- **Adjustment layers** (*+ Adjustment…*): Brightness/Contrast, Levels, Curves, Hue/Saturation, Color Balance, Black & White, Clarity, Dehaze, Grain, Invert. They change everything below them and never touch the original pixels. With a selection, the adjustment only affects the selected area.
+- **Brush (B) and Eraser (E):** size, hardness, opacity, color. `[` and `]` change the size.
+- **Text (T):** tap the picture, then type in the Properties panel (font, size, color, bold, italic, alignment).
+- **Selections:** Rectangle (M), Ellipse, Lasso (L), Magic wand (W). Shift adds, Alt subtracts. Then Fill, Delete, Invert or turn the selection into a mask. Brushes only paint inside the selection.
+- **Masks:** *Mask* adds a layer mask (from the selection if there is one). Tap the mask thumbnail and paint: *Hide* paints black, *Reveal* paints white.
+- **Clip:** shows a layer only where the layer below has pixels (great for putting a photo inside text).
+- **Undo/Redo** (Ctrl+Z / Ctrl+Shift+Z), zoom with + − 0, Ctrl + scroll or two fingers, Hand tool (H or hold Space).
+- **Export:** PNG, JPEG or WebP. On a phone, *Share / Save to Photos*.
+
+Big photos are reduced to 4096 pixels (2560 on phones) on their longest side to stay fast.
+
+Code map: `photo/doc.js` (layers, undo), `photo/render.js` (stacking the layers), `photo/adjust.js` (color adjustments), `photo/tools.js` (tools), `photo/selection.js`, `photo/curves.js`, `photo/photo.js` (the page).
+
 ## Video editor (`video.html`)
 
 1. **Open a video** (button at the top, or drag and drop the file).
