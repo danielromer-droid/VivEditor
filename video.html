@@ -3,48 +3,104 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Video trimmer · VivEditor</title>
+  <meta name="theme-color" content="#121216">
+  <title>Video editor · VivEditor</title>
   <link rel="stylesheet" href="video.css">
 </head>
 <body>
-  <header>
-    <p class="note"><a href="index.html">VivEditor</a></p>
-    <h1>Video trimmer</h1>
-    <p class="note">Your video never leaves this computer. Everything happens inside your browser.</p>
+  <header class="topbar">
+    <a class="brand" href="index.html">VivEditor</a>
+    <span class="topbar-title">Video</span>
+    <div class="topbar-actions">
+      <label class="btn" for="file">Open video</label>
+      <input type="file" id="file" accept="video/*" hidden>
+    </div>
   </header>
 
-  <main>
-    <section id="step-open" class="card">
-      <h2>1. Open a video</h2>
-      <input type="file" id="file" accept="video/*">
-      <p id="support" class="note"></p>
+  <!-- Shown before a video is opened -->
+  <section id="empty" class="empty">
+    <label for="file" class="dropzone" id="dropzone">
+      <span class="dropzone-icon" aria-hidden="true">▶</span>
+      <strong>Open a video</strong>
+      <span>or drop it here</span>
+      <small>Your video stays on this device. Nothing is uploaded.</small>
+    </label>
+    <p id="support" class="warning" hidden></p>
+  </section>
+
+  <!-- The editor itself -->
+  <main id="editor" class="editor" hidden>
+    <section class="stage">
+      <div class="viewer">
+        <div class="frame" id="frame">
+          <video id="video" playsinline preload="auto"></video>
+          <!-- dark bands showing what the crop will cut off -->
+          <div class="crop-box" id="crop-box" hidden></div>
+        </div>
+      </div>
+
+      <div class="timeline-tools">
+        <button id="play" class="icon-btn" title="Play the edit (space)" aria-label="Play">▶</button>
+        <span class="time"><span id="time-now">0:00.0</span> <span class="muted">/ <span id="time-total">0:00.0</span></span></span>
+        <div class="spacer"></div>
+        <button id="split" class="btn small" title="Cut the clip in two at the playhead (S)">✂ Split</button>
+        <button id="delete" class="btn small" title="Remove the selected part (Delete)">🗑 Delete part</button>
+        <button id="reset" class="btn small ghost" title="Undo all cuts">Reset</button>
+      </div>
+
+      <div class="timeline" id="timeline">
+        <canvas id="thumbs" class="thumbs"></canvas>
+        <div id="segments" class="segments"></div>
+        <div id="playhead" class="playhead"></div>
+      </div>
+      <p class="hint">Drag the yellow handles to trim. Put the playhead where you want to cut, then <b>Split</b>. Tap a part and press <b>Delete part</b> to remove it.</p>
     </section>
 
-    <section id="step-trim" class="card" hidden>
-      <h2>2. Choose the part to keep</h2>
-      <video id="video" controls playsinline></video>
+    <aside class="panel">
+      <h2>Export</h2>
 
-      <div class="row">
-        <label>Start <output id="start-label">0:00.0</output></label>
-        <input type="range" id="start" min="0" max="0" step="0.1" value="0">
-        <button id="set-start">Start = current position</button>
+      <div class="field">
+        <span class="label">Shape</span>
+        <div class="chips" id="aspect">
+          <button data-value="original" class="chip active">Original</button>
+          <button data-value="1:1" class="chip">Square 1:1</button>
+          <button data-value="9:16" class="chip">Vertical 9:16</button>
+          <button data-value="4:5" class="chip">Portrait 4:5</button>
+          <button data-value="16:9" class="chip">Wide 16:9</button>
+        </div>
       </div>
-      <div class="row">
-        <label>End <output id="end-label">0:00.0</output></label>
-        <input type="range" id="end" min="0" max="0" step="0.1" value="0">
-        <button id="set-end">End = current position</button>
-      </div>
-      <p>Length kept: <strong id="length">0:00.0</strong></p>
-      <button id="preview">Play selection</button>
-    </section>
 
-    <section id="step-export" class="card" hidden>
-      <h2>3. Save as MP4</h2>
-      <button id="export" class="primary">Export MP4</button>
+      <label class="field">
+        <span class="label">Size</span>
+        <select id="size">
+          <option value="0">Same as the video</option>
+          <option value="1080">1080p (Full HD)</option>
+          <option value="720">720p (smaller file)</option>
+          <option value="480">480p (very small)</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="label">Quality</span>
+        <select id="quality">
+          <option value="high">High</option>
+          <option value="medium" selected>Medium</option>
+          <option value="low">Low (smallest file)</option>
+        </select>
+      </label>
+
+      <label class="field toggle">
+        <input type="checkbox" id="mute">
+        <span>Remove the sound</span>
+      </label>
+
+      <p class="summary" id="summary"></p>
+
+      <button id="export" class="btn primary wide">Export MP4</button>
       <progress id="progress" max="1" value="0" hidden></progress>
-      <p id="status" class="note"></p>
-      <a id="download" hidden>Download the MP4</a>
-    </section>
+      <p id="status" class="status"></p>
+      <a id="download" class="btn wide download" hidden>Download</a>
+    </aside>
   </main>
 
   <script type="module" src="video.js"></script>
