@@ -1,4 +1,4 @@
-# My editor
+# VivEditor
 
 A photo and video editor that runs **only in your browser**. Your files are never uploaded.
 
