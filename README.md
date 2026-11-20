@@ -2,6 +2,8 @@
 
 A photo and video editor that runs **only in your browser**. Your files are never uploaded.
 
+**Try it:** https://danielromer-droid.github.io/VivEditor/
+
 ## Stage 2: video trimmer (`video.html`)
 
 1. Open a video file (MP4, WebM, MOV…).
