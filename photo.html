@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121216">
+  <title>Photo editor · VivEditor</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="photo.css">
+</head>
+<body class="photo-page">
+  <header class="topbar">
+    <a class="brand" href="index.html">VivEditor</a>
+    <span class="topbar-title">Photo</span>
+    <div class="topbar-actions">
+      <button class="btn small" id="btn-new" title="New blank picture">New</button>
+      <button class="btn small" id="btn-open" title="Open a photo">Open</button>
+      <button class="btn small needs-doc" id="btn-add" title="Add a photo as a new layer">+ Photo</button>
+      <button class="btn small primary needs-doc" id="btn-export" title="Save as PNG, JPEG or WebP">Export</button>
+    </div>
+    <input type="file" id="open-file" accept="image/*" hidden>
+    <input type="file" id="add-file" accept="image/*" hidden>
+  </header>
+
+  <!-- Shown before a picture is opened -->
+  <section id="empty" class="empty">
+    <label for="open-file" class="dropzone" id="dropzone">
+      <span class="dropzone-icon" aria-hidden="true">🖼</span>
+      <strong>Open a photo</strong>
+      <span>or drop it here, or paste it</span>
+      <small>Your photo stays on this device. Nothing is uploaded.</small>
+    </label>
+    <p class="center"><button class="btn" id="btn-new-empty">Start with a blank picture</button></p>
+  </section>
+
+  <main id="app" class="photo-app" hidden>
+    <nav class="toolbar" id="toolbar" aria-label="Tools">
+      <button data-tool="move" title="Move, scale, rotate (V)">✥<span>Move</span></button>
+      <button data-tool="crop" title="Crop (C)">⛶<span>Crop</span></button>
+      <button data-tool="brush" title="Brush (B)">🖌<span>Brush</span></button>
+      <button data-tool="eraser" title="Eraser (E)">⌫<span>Eraser</span></button>
+      <button data-tool="text" title="Text (T)">T<span>Text</span></button>
+      <button data-tool="marquee" title="Rectangle selection (M)">⬚<span>Select</span></button>
+      <button data-tool="ellipse" title="Ellipse selection">◯<span>Ellipse</span></button>
+      <button data-tool="lasso" title="Lasso (L)">➰<span>Lasso</span></button>
+      <button data-tool="wand" title="Magic wand (W)">✨<span>Wand</span></button>
+      <button data-tool="hand" title="Hand: move around (H, or hold Space)">✋<span>Hand</span></button>
+    </nav>
+
+    <section class="work">
+      <div class="tool-options" id="tool-options"></div>
+      <div class="workspace" id="workspace">
+        <div class="scroller" id="scroller">
+          <div class="pad"><canvas id="view"></canvas></div>
+        </div>
+        <canvas id="overlay" class="overlay"></canvas>
+      </div>
+      <div class="statusbar">
+        <button class="icon-btn small" id="zoom-out" aria-label="Zoom out">−</button>
+        <button class="btn small ghost" id="zoom-fit" title="Fit to screen (0)">100%</button>
+        <button class="icon-btn small" id="zoom-in" aria-label="Zoom in">+</button>
+        <span class="muted" id="doc-size"></span>
+        <button class="btn small" id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button>
+        <button class="btn small" id="btn-redo" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel" id="props-panel">
+        <h2 id="props-title">Properties</h2>
+        <div id="props"></div>
+      </section>
+
+      <section class="panel layers-panel">
+        <h2>Layers</h2>
+        <div class="layer-top">
+          <select id="blend" title="Blend mode" aria-label="Blend mode">
+            <option value="source-over">Normal</option>
+            <option value="darken">Darken</option>
+            <option value="multiply">Multiply</option>
+            <option value="color-burn">Color burn</option>
+            <option value="lighten">Lighten</option>
+            <option value="screen">Screen</option>
+            <option value="color-dodge">Color dodge</option>
+            <option value="overlay">Overlay</option>
+            <option value="soft-light">Soft light</option>
+            <option value="hard-light">Hard light</option>
+            <option value="difference">Difference</option>
+            <option value="exclusion">Exclusion</option>
+            <option value="hue">Hue</option>
+            <option value="saturation">Saturation</option>
+            <option value="color">Color</option>
+            <option value="luminosity">Luminosity</option>
+          </select>
+          <label class="opacity" title="Opacity">
+            <span class="muted">Opacity</span>
+            <input type="range" id="opacity" min="0" max="100" value="100">
+            <output id="opacity-value">100%</output>
+          </label>
+        </div>
+        <ul id="layers" class="layers"></ul>
+        <div class="layer-actions">
+          <button class="btn small" id="layer-add" title="New empty layer">+ Layer</button>
+          <select id="adjust-add" class="small-select" title="New adjustment layer">
+            <option value="">+ Adjustment…</option>
+          </select>
+          <button class="btn small" id="layer-mask" title="Add a mask (uses the selection if there is one)">Mask</button>
+          <button class="btn small" id="layer-clip" title="Clip to the layer below">Clip</button>
+          <button class="btn small" id="layer-dup" title="Duplicate layer">Duplicate</button>
+          <button class="icon-btn small" id="layer-up" title="Move up" aria-label="Move layer up">↑</button>
+          <button class="icon-btn small" id="layer-down" title="Move down" aria-label="Move layer down">↓</button>
+          <button class="icon-btn small danger" id="layer-del" title="Delete layer" aria-label="Delete layer">🗑</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <dialog id="new-dialog" class="dialog">
+    <form method="dialog">
+      <h2>New picture</h2>
+      <div class="chips" id="new-presets">
+        <button type="button" class="chip" data-size="1080x1080">Square 1080</button>
+        <button type="button" class="chip" data-size="1080x1920">Story 1080×1920</button>
+        <button type="button" class="chip" data-size="1920x1080">HD 1920×1080</button>
+        <button type="button" class="chip" data-size="1240x1754">A4 (150 dpi)</button>
+      </div>
+      <div class="row2">
+        <label class="field"><span class="label">Width (px)</span><input type="number" id="new-w" min="1" max="8000" value="1080"></label>
+        <label class="field"><span class="label">Height (px)</span><input type="number" id="new-h" min="1" max="8000" value="1080"></label>
+      </div>
+      <label class="field"><span class="label">Background</span>
+        <select id="new-bg">
+          <option value="#ffffff">White</option>
+          <option value="#000000">Black</option>
+          <option value="transparent">Transparent</option>
+        </select>
+      </label>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel">Cancel</button>
+        <button class="btn primary" value="ok" id="new-ok">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="export-dialog" class="dialog">
+    <form method="dialog">
+      <h2>Export</h2>
+      <label class="field"><span class="label">Format</span>
+        <select id="export-format">
+          <option value="image/png">PNG (best quality, keeps transparency)</option>
+          <option value="image/jpeg" selected>JPEG (photos, small files)</option>
+          <option value="image/webp">WebP (modern, small files)</option>
+        </select>
+      </label>
+      <label class="field" id="export-quality-field"><span class="label">Quality <output id="export-quality-value">90</output></span>
+        <input type="range" id="export-quality" min="40" max="100" value="90">
+      </label>
+      <label class="field"><span class="label">File name</span><input type="text" id="export-name" value="viveditor"></label>
+      <p class="muted" id="export-info"></p>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel">Close</button>
+        <button class="btn" type="button" id="export-share" hidden>Share / Save to Photos</button>
+        <button class="btn primary" type="button" id="export-go">Download</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="photo/photo.js"></script>
+</body>
+</html>
