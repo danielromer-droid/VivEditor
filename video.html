@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video trimmer</title>
+  <link rel="stylesheet" href="video.css">
+</head>
+<body>
+  <header>
+    <h1>Video trimmer</h1>
+    <p class="note">Your video never leaves this computer. Everything happens inside your browser.</p>
+  </header>
+
+  <main>
+    <section id="step-open" class="card">
+      <h2>1. Open a video</h2>
+      <input type="file" id="file" accept="video/*">
+      <p id="support" class="note"></p>
+    </section>
+
+    <section id="step-trim" class="card" hidden>
+      <h2>2. Choose the part to keep</h2>
+      <video id="video" controls playsinline></video>
+
+      <div class="row">
+        <label>Start <output id="start-label">0:00.0</output></label>
+        <input type="range" id="start" min="0" max="0" step="0.1" value="0">
+        <button id="set-start">Start = current position</button>
+      </div>
+      <div class="row">
+        <label>End <output id="end-label">0:00.0</output></label>
+        <input type="range" id="end" min="0" max="0" step="0.1" value="0">
+        <button id="set-end">End = current position</button>
+      </div>
+      <p>Length kept: <strong id="length">0:00.0</strong></p>
+      <button id="preview">Play selection</button>
+    </section>
+
+    <section id="step-export" class="card" hidden>
+      <h2>3. Save as MP4</h2>
+      <button id="export" class="primary">Export MP4</button>
+      <progress id="progress" max="1" value="0" hidden></progress>
+      <p id="status" class="note"></p>
+      <a id="download" hidden>Download the MP4</a>
+    </section>
+  </main>
+
+  <script type="module" src="video.js"></script>
+</body>
+</html>
