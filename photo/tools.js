@@ -195,6 +195,14 @@ function makeCropTool(app) {
 // kind: 'brush' | 'eraser' | 'clone' | 'heal'
 // While you paint, the stroke is collected on a separate canvas (doc.live) and shown
 // live; when you let go it is "committed" into the layer (that's one undo step).
+function cloneMask(c) {
+  const m = makeCanvas(c.width, c.height);
+  m.getContext('2d').drawImage(c, 0, 0);
+  return m;
+}
+
+let busy = false; // an AI job is running
+
 function makePaintTool(app, kind) {
   let last = null;
   let hoverPoint = null;
@@ -203,7 +211,7 @@ function makePaintTool(app, kind) {
     const o = app.opts;
     const live = app.doc.live;
     const r = Math.max(0.5, o.size / 2);
-    const white = live.target === 'mask' || kind === 'clone' || kind === 'heal';
+    const white = live.target === 'mask' || kind !== 'brush';
     const [cr, cg, cb] = white ? [255, 255, 255] : hexToRgb(o.color);
     if (o.hardness >= 0.99) {
       ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
@@ -248,7 +256,7 @@ function makePaintTool(app, kind) {
       }
 
       const onMask = doc.target === 'mask' && L && L.mask;
-      if (onMask && (kind === 'clone' || kind === 'heal')) {
+      if (onMask && (kind === 'clone' || kind === 'heal' || kind === 'airemove')) {
         app.toast('Clone and Heal work on the layer itself. Tap the layer thumbnail (not the mask) first.');
         return;
       }
@@ -264,17 +272,18 @@ function makePaintTool(app, kind) {
       }
 
       // copy the pixels to sample BEFORE the stroke starts
-      const sample = kind === 'clone' || kind === 'heal' ? samplePixels(L) : null;
+      if (busy) { app.toast('Please wait, the AI is still working…'); return; }
+      const sample = kind === 'clone' || kind === 'heal' || kind === 'airemove' ? samplePixels(L) : null;
 
       let mode;
       if (onMask) mode = kind === 'eraser' ? 'reveal' : o.maskPaint;
-      else mode = { brush: 'paint', eraser: 'erase', clone: 'clone', heal: 'heal' }[kind];
+      else mode = { brush: 'paint', eraser: 'erase', clone: 'clone', heal: 'heal', airemove: 'heal' }[kind];
       doc.live = {
         layerId: L.id,
         target: onMask ? 'mask' : 'layer',
         canvas: makeCanvas(doc.width, doc.height),
         mode,
-        opacity: kind === 'heal' ? 1 : o.opacity,
+        opacity: kind === 'heal' || kind === 'airemove' ? 1 : o.opacity,
         bbox: { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity },
       };
 
@@ -285,7 +294,7 @@ function makePaintTool(app, kind) {
         fill.getContext('2d').drawImage(sample, -o.cloneOffset.x, -o.cloneOffset.y);
         sample.width = 0;
         doc.live.fill = fill;
-      } else if (kind === 'heal') {
+      } else if (kind === 'heal' || kind === 'airemove') {
         doc.live.sample = sample;
       }
 
@@ -296,7 +305,7 @@ function makePaintTool(app, kind) {
     move(p) {
       hoverPoint = p;
       const live = app.doc.live;
-      if (!live || !last) { app.changed('overlay'); return; }
+      if (!live || !last || busy) { app.changed('overlay'); return; }
       const ctx = live.canvas.getContext('2d');
       const step = Math.max(1, app.opts.size * 0.12);
       const d = dist(p, last);
@@ -313,8 +322,23 @@ function makePaintTool(app, kind) {
       const doc = app.doc;
       const live = doc.live;
       last = null;
-      if (!live) return;
+      if (!live || busy) return;
       const L = doc.layers.find((l) => l.id === live.layerId);
+
+      if (kind === 'airemove') {
+        // The AI takes a few seconds: keep the purple stroke visible meanwhile.
+        const mask = cloneMask(app.renderer.liveStroke(doc));
+        const b = live.bbox;
+        const bbox = { x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 };
+        busy = true;
+        app.aiRemoveArea(L, live.sample, mask, bbox).finally(() => {
+          busy = false;
+          doc.live = null;
+          freeCanvas(live.canvas); freeCanvas(live.sample); freeCanvas(mask);
+          app.changed('commit');
+        });
+        return;
+      }
 
       if (live.mode === 'heal') {
         const mask = app.renderer.liveStroke(doc); // limited to the selection
@@ -525,6 +549,49 @@ function makeWandTool(app) {
   };
 }
 
+// ---------------------------------------------------------------- AI Select
+// Tap an object: the AI finds its outline. Shift/“+ Add” tap: include more. Alt/“− Subtract”: leave out.
+function makeAiSelectTool(app) {
+  let points = [];
+  return {
+    name: 'aiselect',
+    cursor: 'crosshair',
+    async down(p, e) {
+      if (busy) { app.toast('Please wait, the AI is still working…'); return; }
+      const mode = selectionMode(app, e);
+      if (mode === 'new' || !points.length) points = [];
+      points.push({ x: p.x, y: p.y, positive: mode !== 'subtract' });
+      app.changed('overlay');
+      busy = true;
+      try {
+        const sel = await app.aiSelect(points);
+        if (sel) {
+          app.doc.checkpoint();
+          app.doc.setSelection(sel);
+          app.changed('selection');
+        }
+      } catch (err) {
+        console.error(err);
+        app.toast(err.message || 'The AI could not run.');
+        points = [];
+      } finally {
+        busy = false;
+        app.changed('overlay');
+      }
+    },
+    reset() { points = []; },
+    overlay(ctx) {
+      for (const pt of points) {
+        const s = app.toScreen(pt.x, pt.y);
+        ctx.fillStyle = pt.positive ? '#5be37d' : '#ff6b6b';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(s.x, s.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+    },
+  };
+}
+
 // ---------------------------------------------------------------- Hand (pan)
 function makeHandTool(app) {
   let start = null;
@@ -550,6 +617,8 @@ export function makeTools(app) {
     eraser: makePaintTool(app, 'eraser'),
     clone: makePaintTool(app, 'clone'),
     heal: makePaintTool(app, 'heal'),
+    airemove: makePaintTool(app, 'airemove'),
+    aiselect: makeAiSelectTool(app),
     text: makeTextTool(app, move),
     marquee: makeShapeSelectTool(app, 'rect'),
     ellipse: makeShapeSelectTool(app, 'ellipse'),

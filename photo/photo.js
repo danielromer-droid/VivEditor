@@ -8,6 +8,7 @@ import { selectAll, invertSelection, selectionOutline } from './selection.js';
 import { curvesEditor } from './curves.js';
 import { heal, opaqueBounds } from './heal.js';
 import { makeTiff, makePdf, makePsd } from './formats.js';
+import { aiSelect, findForeground, aiRemove } from './ai.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -56,6 +57,11 @@ const app = {
   changed,
   toast,
   refreshToolOptions: () => renderToolOptions(),
+  aiSelect: (points) => runAi(() => aiSelect(snapshotPicture(), pictureKey(), points, status)),
+  aiRemoveArea: (L, sample, mask, bbox) => runAi(async () => {
+    const result = await aiRemove(sample, mask, bbox, status);
+    applyPatch(L, result);
+  }),
   fit,
   composite: () => renderer.render(doc, { useCache: false }),
   layerPixels(L) {
@@ -74,6 +80,84 @@ const app = {
     });
   },
 };
+
+// ---------------------------------------------------------------- AI helpers
+// A copy of what you see (all layers), and a "fingerprint" that changes when it changes.
+function snapshotPicture() {
+  const c = makeCanvas(doc.width, doc.height);
+  c.getContext('2d').drawImage(renderer.render(doc, { useCache: false }), 0, 0);
+  return c;
+}
+function pictureKey() {
+  return `${doc.width}x${doc.height}|` + doc.layers.map((l) => `${l.id}:${l.rev}:${l.visible ? 1 : 0}`).join(',');
+}
+// A message that stays while the AI works.
+function status(msg) { toast(msg, 0); }
+
+async function runAi(job) {
+  try {
+    const r = await job();
+    hideToast();
+    return r;
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'The AI could not run on this device.');
+    return null;
+  }
+}
+
+// Put new pixels (in picture coordinates) into an image layer.
+function applyPatch(L, result) {
+  if (!result) return;
+  doc.checkpoint();
+  doc.editCanvas(L, 'canvas', (ctx, c) => {
+    ctx.setTransform(layerMatrix(L, c.width, c.height).inverse());
+    ctx.drawImage(result.canvas, result.x, result.y);
+  });
+  changed('commit');
+}
+
+async function removeBackground(L) {
+  if (!L || L.type !== 'image') { toast('Choose a photo layer first.'); return; }
+  const pixels = app.layerPixels(L);
+  const fg = await runAi(() => findForeground(pixels, status));
+  freeCanvas(pixels);
+  if (!fg) return;
+  doc.checkpoint();
+  if (L.mask) {
+    // keep what the old mask already hid
+    const m = cloneCanvas(L.mask);
+    const mctx = m.getContext('2d');
+    mctx.globalCompositeOperation = 'destination-in';
+    mctx.drawImage(fg, 0, 0);
+    L.mask = m;
+  } else {
+    L.mask = fg;
+  }
+  doc.touch(L);
+  doc.target = 'mask';
+  changed('structure');
+  toast('Background hidden with a mask. Paint the mask (Hide / Reveal) to fix details.');
+}
+
+async function selectSubject() {
+  const fg = await runAi(() => findForeground(snapshotPicture(), status));
+  if (!fg) return;
+  doc.checkpoint();
+  doc.setSelection(fg);
+  changed('selection');
+}
+
+async function aiRemoveSelection() {
+  const L = doc.active;
+  if (!doc.selection) return;
+  if (!L || L.type !== 'image') { toast('Choose an image layer first (or add an empty layer).'); return; }
+  const bbox = opaqueBounds(doc.selection);
+  if (!bbox) return;
+  const sample = opts.sampleAll ? snapshotPicture() : app.layerPixels(L);
+  await runAi(async () => applyPatch(L, await aiRemove(sample, doc.selection, bbox, status)));
+  freeCanvas(sample);
+}
 
 const tools = makeTools(app);
 let tool = tools.move;
@@ -268,6 +352,8 @@ const toolHints = {
   crop: 'Drag to choose the part to keep.',
   text: 'Tap the picture to add text, or tap a text to select and drag it. Edit it on the right.',
   hand: 'Drag to move around. Pinch or Ctrl + scroll to zoom.',
+  aiselect: 'Tap an object: the AI selects it. “+ Add” (or Shift) tap to include more, “− Subtract” (or Alt) to leave a part out.',
+  airemove: 'Paint over something to remove: the AI fills it with background when you let go.',
   clone: 'Alt + click (or “Set source”) where to copy from, then paint. Tip: paint on an empty layer to keep the photo intact.',
   heal: 'Paint over a spot or a small object: when you let go, it is replaced by texture from around it.',
 };
@@ -325,7 +411,18 @@ function renderToolOptions() {
   const add = (...n) => box.append(...n);
   const sep = () => el('span', { class: 'sep' });
 
-  if (toolName === 'clone' || toolName === 'heal') {
+  if (toolName === 'aiselect') {
+    add(chipGroup([['new', 'New'], ['add', '+ Add'], ['subtract', '− Subtract']], () => opts.selMode, (v) => (opts.selMode = v)));
+    add(el('button', { class: 'btn small', onclick: () => selectSubject(), title: 'Select the person / main subject automatically' }, '👤 Select subject'));
+    add(sep(), ...selectionButtons());
+    add(el('span', { class: 'hint' }, toolHints.aiselect));
+  } else if (toolName === 'airemove') {
+    add(rangeOpt('Size', 4, 400, 1, () => opts.size, (v) => (opts.size = v), (v) => `${v}px`));
+    const all = el('input', { type: 'checkbox', checked: opts.sampleAll });
+    all.onchange = () => (opts.sampleAll = all.checked);
+    add(el('label', { class: 'opt' }, [all, 'Use all layers']));
+    add(el('span', { class: 'hint' }, toolHints.airemove));
+  } else if (toolName === 'clone' || toolName === 'heal') {
     add(rangeOpt('Size', 1, 400, 1, () => opts.size, (v) => (opts.size = v), (v) => `${v}px`));
     add(rangeOpt('Hardness', 0, 100, 1, () => Math.round(opts.hardness * 100), (v) => (opts.hardness = v / 100), (v) => `${v}%`));
     if (toolName === 'clone') {
@@ -392,6 +489,7 @@ function selectionButtons() {
       b('Fill', () => selection('fill'), 'Fill with the brush color'),
       b('Delete', () => selection('delete'), 'Erase the selected pixels (Delete)'),
       b('✨ Heal', () => selection('heal'), 'Fill the selection with texture from around it (remove an object)'),
+      b('🤖 AI Remove', () => aiRemoveSelection(), 'Remove what is selected with AI (best for objects and people)'),
       b('→ Mask', () => selection('mask'), 'Make a layer mask from the selection'),
     );
   }
@@ -812,6 +910,9 @@ function renderProps() {
   }
 
   $('props-title').textContent = L.name;
+  box.append(el('div', { class: 'prop-row' }, [
+    el('button', { class: 'btn small primary', onclick: () => removeBackground(L), title: 'The AI finds the subject (best with people) and hides the rest with a mask' }, '🤖 Remove background'),
+  ]));
   box.append(transformProps(L));
   const src = L.canvas;
   box.append(el('p', { class: 'prop-note', style: 'margin-top:10px' }, `Pixels: ${src.width} × ${src.height}`));
@@ -1070,15 +1171,19 @@ window.addEventListener('keyup', (e) => {
 
 // ---------------------------------------------------------------- small message at the bottom
 let toastTimer = 0;
-function toast(msg) {
+function toast(msg, duration = 3500) {
   const t = $('toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  if (duration) toastTimer = setTimeout(() => t.classList.remove('show'), duration);
+}
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('toast').classList.remove('show');
 }
 
 for (const b of document.querySelectorAll('.needs-doc')) b.disabled = true;
 
 // For automated tests and curious people: window.viveditor gives access to the editor.
-window.viveditor = { get doc() { return doc; }, app, tools, setTool, selection };
+window.viveditor = { get doc() { return doc; }, app, tools, setTool, selection, removeBackground, selectSubject, aiRemoveSelection };
