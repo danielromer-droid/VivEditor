@@ -6,6 +6,8 @@ import { ADJUSTMENTS } from './adjust.js';
 import { makeTools, FONTS } from './tools.js';
 import { selectAll, invertSelection, selectionOutline } from './selection.js';
 import { curvesEditor } from './curves.js';
+import { heal, opaqueBounds } from './heal.js';
+import { makeTiff, makePdf, makePsd } from './formats.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -28,6 +30,11 @@ const opts = {
   tolerance: 32,
   contiguous: true,
   wandAll: true,
+  sampleAll: true, // clone/heal copy from all layers
+  cloneSource: null,
+  cloneOffset: null,
+  cloneAligned: true,
+  pickSource: false,
 };
 
 // ---------------------------------------------------------------- the "app" object tools use
@@ -48,6 +55,7 @@ const app = {
   },
   changed,
   toast,
+  refreshToolOptions: () => renderToolOptions(),
   fit,
   composite: () => renderer.render(doc, { useCache: false }),
   layerPixels(L) {
@@ -260,6 +268,8 @@ const toolHints = {
   crop: 'Drag to choose the part to keep.',
   text: 'Tap the picture to add text, or tap a text to select and drag it. Edit it on the right.',
   hand: 'Drag to move around. Pinch or Ctrl + scroll to zoom.',
+  clone: 'Alt + click (or “Set source”) where to copy from, then paint. Tip: paint on an empty layer to keep the photo intact.',
+  heal: 'Paint over a spot or a small object: when you let go, it is replaced by texture from around it.',
 };
 
 function setTool(name) {
@@ -315,7 +325,22 @@ function renderToolOptions() {
   const add = (...n) => box.append(...n);
   const sep = () => el('span', { class: 'sep' });
 
-  if (toolName === 'brush' || toolName === 'eraser') {
+  if (toolName === 'clone' || toolName === 'heal') {
+    add(rangeOpt('Size', 1, 400, 1, () => opts.size, (v) => (opts.size = v), (v) => `${v}px`));
+    add(rangeOpt('Hardness', 0, 100, 1, () => Math.round(opts.hardness * 100), (v) => (opts.hardness = v / 100), (v) => `${v}%`));
+    if (toolName === 'clone') {
+      add(rangeOpt('Opacity', 1, 100, 1, () => Math.round(opts.opacity * 100), (v) => (opts.opacity = v / 100), (v) => `${v}%`));
+      const pick = el('button', { class: `btn small toggle-btn${opts.pickSource ? ' active' : ''}`, title: 'Then tap the picture where you want to copy from (or Alt + click)' }, '◎ Set source');
+      pick.onclick = () => { opts.pickSource = !opts.pickSource; pick.classList.toggle('active', opts.pickSource); };
+      const aligned = el('input', { type: 'checkbox', checked: opts.cloneAligned });
+      aligned.onchange = () => { opts.cloneAligned = aligned.checked; opts.cloneOffset = null; };
+      add(sep(), pick, el('label', { class: 'opt', title: 'Keep the same distance between source and brush for every stroke' }, [aligned, 'Aligned']));
+    }
+    const all = el('input', { type: 'checkbox', checked: opts.sampleAll });
+    all.onchange = () => (opts.sampleAll = all.checked);
+    add(el('label', { class: 'opt', title: 'Copy from what you see (all layers). Untick to copy only from this layer.' }, [all, 'Use all layers']));
+    add(el('span', { class: 'hint' }, toolHints[toolName]));
+  } else if (toolName === 'brush' || toolName === 'eraser') {
     add(rangeOpt('Size', 1, 400, 1, () => opts.size, (v) => (opts.size = v), (v) => `${v}px`));
     add(rangeOpt('Hardness', 0, 100, 1, () => Math.round(opts.hardness * 100), (v) => (opts.hardness = v / 100), (v) => `${v}%`));
     add(rangeOpt('Opacity', 1, 100, 1, () => Math.round(opts.opacity * 100), (v) => (opts.opacity = v / 100), (v) => `${v}%`));
@@ -366,6 +391,7 @@ function selectionButtons() {
       b('Invert', () => selection('invert'), 'Invert (Ctrl+Shift+I)'),
       b('Fill', () => selection('fill'), 'Fill with the brush color'),
       b('Delete', () => selection('delete'), 'Erase the selected pixels (Delete)'),
+      b('✨ Heal', () => selection('heal'), 'Fill the selection with texture from around it (remove an object)'),
       b('→ Mask', () => selection('mask'), 'Make a layer mask from the selection'),
     );
   }
@@ -378,6 +404,32 @@ function selection(action) {
   if (action === 'all') { doc.checkpoint(); doc.setSelection(selectAll(doc.width, doc.height)); }
   else if (action === 'none') { if (!doc.selection) return; doc.checkpoint(); doc.setSelection(null); }
   else if (action === 'invert') { doc.checkpoint(); doc.setSelection(invertSelection(doc.selection, doc.width, doc.height)); }
+  else if (action === 'heal') {
+    if (!doc.selection) return;
+    if (!L || L.type !== 'image') { toast('Choose an image layer first (or add an empty layer).'); return; }
+    const bbox = opaqueBounds(doc.selection);
+    if (!bbox) return;
+    if (bbox.w * bbox.h > 1600 * 1600) { toast('This selection is too big to heal. Try a smaller area.'); return; }
+    toast('Healing…');
+    setTimeout(() => {
+      let sample;
+      if (opts.sampleAll) {
+        sample = makeCanvas(doc.width, doc.height);
+        sample.getContext('2d').drawImage(app.composite(), 0, 0);
+      } else sample = app.layerPixels(L);
+      const result = heal(sample, doc.selection, bbox);
+      freeCanvas(sample);
+      if (!result) return;
+      doc.checkpoint();
+      doc.editCanvas(L, 'canvas', (ctx, c) => {
+        ctx.setTransform(layerMatrix(L, c.width, c.height).inverse());
+        ctx.drawImage(result.canvas, result.x, result.y);
+      });
+      toast('Done.');
+      changed('commit');
+    }, 30);
+    return;
+  }
   else if (action === 'delete' || action === 'fill') {
     if (!doc.selection) return;
     if (!L || L.type !== 'image') { toast('Choose an image layer first.'); return; }
@@ -893,14 +945,21 @@ newDialog.addEventListener('close', () => {
 
 // ---------------------------------------------------------------- export
 const exportDialog = $('export-dialog');
-let exportBlob = null;
+
+const FORMATS = {
+  'image/png': { ext: 'png', note: 'Keeps transparency.' },
+  'image/jpeg': { ext: 'jpg', quality: true, note: 'Transparent areas become white.' },
+  'image/webp': { ext: 'webp', quality: true, note: 'Small files, keeps transparency.' },
+  'image/tiff': { ext: 'tif', note: 'Uncompressed: big file, best for printing and other programs.' },
+  'application/pdf': { ext: 'pdf', quality: true, note: 'One page; the size is the picture at 150 dpi.' },
+  'image/vnd.adobe.photoshop': { ext: 'psd', note: 'Photoshop file with your layers, masks, blend modes and clipping. Text and adjustment layers become normal pixel layers.' },
+};
 
 function updateExportUi() {
   const fmt = $('export-format').value;
-  $('export-quality-field').hidden = fmt === 'image/png';
+  $('export-quality-field').hidden = !FORMATS[fmt].quality;
   $('export-quality-value').textContent = $('export-quality').value;
-  $('export-info').textContent = `${doc.width} × ${doc.height} pixels${fmt === 'image/jpeg' ? ' · transparent areas become white' : ''}`;
-  exportBlob = null;
+  $('export-info').textContent = `${doc.width} × ${doc.height} pixels · ${FORMATS[fmt].note}`;
 }
 $('export-format').onchange = updateExportUi;
 $('export-quality').oninput = updateExportUi;
@@ -916,46 +975,61 @@ $('btn-export').onclick = () => {
 
 async function makeExportFile() {
   const fmt = $('export-format').value;
-  const out = renderer.render(doc, { useCache: false });
-  let src = out;
-  if (fmt === 'image/jpeg') {
-    src = makeCanvas(doc.width, doc.height);
-    const ctx = src.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, doc.width, doc.height);
-    ctx.drawImage(out, 0, 0);
+  const quality = Number($('export-quality').value) / 100;
+  const { ext } = FORMATS[fmt];
+  const name = `${($('export-name').value || 'viveditor').replace(/[\\/:*?"<>|]+/g, '-')}.${ext}`;
+  let blob;
+  if (fmt === 'image/vnd.adobe.photoshop') {
+    blob = await makePsd(doc);
+  } else {
+    const out = renderer.render(doc, { useCache: false });
+    if (fmt === 'image/tiff') blob = makeTiff(out);
+    else if (fmt === 'application/pdf') blob = await makePdf(out, 150, quality);
+    else {
+      let src = out;
+      if (fmt === 'image/jpeg') {
+        src = makeCanvas(doc.width, doc.height);
+        const ctx = src.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, doc.width, doc.height);
+        ctx.drawImage(out, 0, 0);
+      }
+      blob = await new Promise((res) => src.toBlob(res, fmt, quality));
+      if (!blob) throw new Error('This browser could not create the file.');
+      // Some browsers (older Safari) silently make PNG when asked for WebP.
+      if (blob.type !== fmt) return new File([blob], name.replace(/\.[^.]+$/, '.png'), { type: blob.type });
+    }
   }
-  const blob = await new Promise((res) => src.toBlob(res, fmt, Number($('export-quality').value) / 100));
-  if (!blob) throw new Error('This browser could not create the file.');
-  const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[fmt];
-  // Some browsers (older Safari) silently make PNG when asked for WebP.
-  const realExt = blob.type === fmt ? ext : 'png';
-  const name = `${($('export-name').value || 'viveditor').replace(/[\\/:*?"<>|]+/g, '-')}.${realExt}`;
   return new File([blob], name, { type: blob.type });
 }
 
-$('export-go').onclick = async () => {
+async function runExport(action) {
+  const go = $('export-go');
+  const share = $('export-share');
+  go.disabled = share.disabled = true;
+  $('export-info').textContent = 'Preparing the file…';
   try {
     const file = await makeExportFile();
-    const url = URL.createObjectURL(file);
-    const a = el('a', { href: url, download: file.name });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    if (action === 'share') {
+      await navigator.share({ files: [file], title: file.name });
+    } else {
+      const url = URL.createObjectURL(file);
+      const a = el('a', { href: url, download: file.name });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    }
     $('export-info').textContent = `Saved ${file.name} (${(file.size / 1e6).toFixed(2)} MB)`;
   } catch (err) {
-    $('export-info').textContent = `Export failed: ${err.message}`;
+    if (err.name !== 'AbortError') $('export-info').textContent = `Export failed: ${err.message}`;
+    else updateExportUi();
+  } finally {
+    go.disabled = share.disabled = false;
   }
-};
-$('export-share').onclick = async () => {
-  try {
-    const file = await makeExportFile();
-    await navigator.share({ files: [file], title: file.name });
-  } catch (err) {
-    if (err.name !== 'AbortError') $('export-info').textContent = `Sharing failed: ${err.message}`;
-  }
-};
+}
+$('export-go').onclick = () => runExport('download');
+$('export-share').onclick = () => runExport('share');
 
 // ---------------------------------------------------------------- undo / redo & keyboard
 $('btn-undo').onclick = () => { if (doc && doc.undo()) afterHistory(); };
@@ -965,7 +1039,7 @@ function afterHistory() {
   renderToolOptions();
 }
 
-const KEYS = { v: 'move', c: 'crop', b: 'brush', e: 'eraser', t: 'text', m: 'marquee', l: 'lasso', w: 'wand', h: 'hand' };
+const KEYS = { v: 'move', c: 'crop', b: 'brush', e: 'eraser', s: 'clone', j: 'heal', t: 'text', m: 'marquee', l: 'lasso', w: 'wand', h: 'hand' };
 
 window.addEventListener('keydown', (e) => {
   if (!doc || $('app').hidden) return;

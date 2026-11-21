@@ -85,6 +85,29 @@ export class Renderer {
     return t;
   }
 
+  // What the stroke adds to the layer: brush color, copied pixels (clone),
+  // or a see-through purple preview (healing happens when you let go).
+  liveContent(doc) {
+    const live = doc.live;
+    const stroke = this.liveStroke(doc);
+    if (live.mode !== 'clone' && live.mode !== 'heal') return stroke;
+    const t = this.ensure('cloneTmp', doc.width, doc.height);
+    const ctx = t.getContext('2d');
+    ctx.globalCompositeOperation = 'copy';
+    if (live.mode === 'clone') {
+      ctx.drawImage(live.fill, 0, 0);
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(stroke, 0, 0);
+    } else {
+      ctx.drawImage(stroke, 0, 0);
+      ctx.globalCompositeOperation = 'source-in';
+      ctx.fillStyle = 'rgba(123,108,255,0.55)';
+      ctx.fillRect(0, 0, t.width, t.height);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    return t;
+  }
+
   drawContent(L, ctx, doc) {
     const src = layerSource(L);
     ctx.setTransform(layerMatrix(L, src.width, src.height));
@@ -93,7 +116,7 @@ export class Renderer {
     if (doc.live && doc.live.layerId === L.id && doc.live.target === 'layer') {
       ctx.globalAlpha = doc.live.opacity;
       ctx.globalCompositeOperation = doc.live.mode === 'erase' ? 'destination-out' : 'source-over';
-      ctx.drawImage(this.liveStroke(doc), 0, 0);
+      ctx.drawImage(this.liveContent(doc), 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
     }
