@@ -13,16 +13,18 @@ Open a photo (or start with a blank picture), then:
 - **Crop (C):** drag the area to keep, then *Apply crop* (or Enter).
 - **Adjustment layers** (*+ Adjustment…*): Brightness/Contrast, Levels, Curves, Hue/Saturation, Color Balance, Black & White, Clarity, Dehaze, Grain, Invert. They change everything below them and never touch the original pixels. With a selection, the adjustment only affects the selected area.
 - **Brush (B) and Eraser (E):** size, hardness, opacity, color. `[` and `]` change the size.
+- **Clone Stamp (S):** Alt + click (or *Set source* on a phone) where to copy from, then paint. *Aligned* keeps the same distance for every stroke.
+- **Spot Healing (J):** paint over a spot or a small object; when you let go it is replaced by texture from around it, with matching colors. With a selection, *✨ Heal* does the same for the whole selected area (remove an object). Tip: use an empty layer with "Use all layers" to keep the original photo untouched.
 - **Text (T):** tap the picture, then type in the Properties panel (font, size, color, bold, italic, alignment).
 - **Selections:** Rectangle (M), Ellipse, Lasso (L), Magic wand (W). Shift adds, Alt subtracts. Then Fill, Delete, Invert or turn the selection into a mask. Brushes only paint inside the selection.
 - **Masks:** *Mask* adds a layer mask (from the selection if there is one). Tap the mask thumbnail and paint: *Hide* paints black, *Reveal* paints white.
 - **Clip:** shows a layer only where the layer below has pixels (great for putting a photo inside text).
 - **Undo/Redo** (Ctrl+Z / Ctrl+Shift+Z), zoom with + − 0, Ctrl + scroll or two fingers, Hand tool (H or hold Space).
-- **Export:** PNG, JPEG or WebP. On a phone, *Share / Save to Photos*.
+- **Export:** PNG, JPEG, WebP, TIFF, PDF or **PSD** (Photoshop, with layers, masks, blend modes and clipping; text and adjustment layers are saved as pixel layers that look the same). On a phone, *Share / Save to Photos*.
 
 Big photos are reduced to 4096 pixels (2560 on phones) on their longest side to stay fast.
 
-Code map: `photo/doc.js` (layers, undo), `photo/render.js` (stacking the layers), `photo/adjust.js` (color adjustments), `photo/tools.js` (tools), `photo/selection.js`, `photo/curves.js`, `photo/photo.js` (the page).
+Code map: `photo/doc.js` (layers, undo), `photo/render.js` (stacking the layers), `photo/adjust.js` (color adjustments), `photo/tools.js` (tools), `photo/selection.js`, `photo/curves.js`, `photo/heal.js` (healing), `photo/formats.js` (TIFF, PDF, PSD; PSD uses [ag-psd](https://github.com/Agamnentzar/ag-psd), MIT, in `lib/`), `photo/photo.js` (the page).
 
 ## Video editor (`video.html`)
 

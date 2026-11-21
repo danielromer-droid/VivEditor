@@ -9,6 +9,7 @@
 import { baseLayer, makeCanvas, freeCanvas, layerMatrix } from './doc.js';
 import { layerCorners, layerSource } from './render.js';
 import { shapeSelection, magicWand, combine } from './selection.js';
+import { heal } from './heal.js';
 
 export const FONTS = [
   ['system-ui, sans-serif', 'Sans serif'],
@@ -190,15 +191,20 @@ function makeCropTool(app) {
   };
 }
 
-// ---------------------------------------------------------------- Brush & eraser
-function makePaintTool(app, eraser) {
+// ---------------------------------------------------------------- Brush, eraser, clone stamp, healing
+// kind: 'brush' | 'eraser' | 'clone' | 'heal'
+// While you paint, the stroke is collected on a separate canvas (doc.live) and shown
+// live; when you let go it is "committed" into the layer (that's one undo step).
+function makePaintTool(app, kind) {
   let last = null;
   let hoverPoint = null;
 
   function dab(ctx, x, y) {
     const o = app.opts;
+    const live = app.doc.live;
     const r = Math.max(0.5, o.size / 2);
-    const [cr, cg, cb] = app.doc.live.target === 'mask' ? [255, 255, 255] : hexToRgb(o.color);
+    const white = live.target === 'mask' || kind === 'clone' || kind === 'heal';
+    const [cr, cg, cb] = white ? [255, 255, 255] : hexToRgb(o.color);
     if (o.hardness >= 0.99) {
       ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
     } else {
@@ -210,31 +216,79 @@ function makePaintTool(app, eraser) {
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
+    const b = live.bbox;
+    b.x0 = Math.min(b.x0, x - r); b.y0 = Math.min(b.y0, y - r);
+    b.x1 = Math.max(b.x1, x + r); b.y1 = Math.max(b.y1, y + r);
+  }
+
+  // A copy of the pixels to copy from (all layers, or only the active one).
+  function samplePixels(L) {
+    if (!app.opts.sampleAll) return app.layerPixels(L);
+    const c = makeCanvas(app.doc.width, app.doc.height);
+    c.getContext('2d').drawImage(app.composite(), 0, 0);
+    return c;
   }
 
   return {
-    name: eraser ? 'eraser' : 'brush',
+    name: kind,
     cursor: 'none',
-    down(p) {
+    down(p, e) {
       const doc = app.doc;
       const L = doc.active;
+      const o = app.opts;
+
+      if (kind === 'clone' && (e.altKey || o.pickSource)) {
+        o.cloneSource = { x: p.x, y: p.y };
+        o.cloneOffset = null;
+        o.pickSource = false;
+        app.toast('Source set. Now paint where you want to copy it.');
+        app.refreshToolOptions();
+        app.changed('overlay');
+        return;
+      }
+
       const onMask = doc.target === 'mask' && L && L.mask;
+      if (onMask && (kind === 'clone' || kind === 'heal')) {
+        app.toast('Clone and Heal work on the layer itself. Tap the layer thumbnail (not the mask) first.');
+        return;
+      }
       if (!L || (!onMask && L.type !== 'image')) {
         app.toast(L && L.type === 'text'
           ? 'This is a text layer. Add an empty layer (+ Layer) to paint, or use “Turn into pixels”.'
-          : 'Brushes paint on image layers or masks. Add an empty layer with “+ Layer”.');
+          : 'This tool works on image layers. Add an empty layer with “+ Layer”.');
         return;
       }
+      if (kind === 'clone' && !o.cloneSource) {
+        app.toast('First choose where to copy from: Alt + click, or tap “Set source” and then the picture.');
+        return;
+      }
+
+      // copy the pixels to sample BEFORE the stroke starts
+      const sample = kind === 'clone' || kind === 'heal' ? samplePixels(L) : null;
+
       let mode;
-      if (onMask) mode = eraser ? 'reveal' : app.opts.maskPaint;
-      else mode = eraser ? 'erase' : 'paint';
+      if (onMask) mode = kind === 'eraser' ? 'reveal' : o.maskPaint;
+      else mode = { brush: 'paint', eraser: 'erase', clone: 'clone', heal: 'heal' }[kind];
       doc.live = {
         layerId: L.id,
         target: onMask ? 'mask' : 'layer',
         canvas: makeCanvas(doc.width, doc.height),
         mode,
-        opacity: app.opts.opacity,
+        opacity: kind === 'heal' ? 1 : o.opacity,
+        bbox: { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity },
       };
+
+      if (kind === 'clone') {
+        // offset = how far the source is from where you paint
+        if (!o.cloneAligned || !o.cloneOffset) o.cloneOffset = { x: o.cloneSource.x - p.x, y: o.cloneSource.y - p.y };
+        const fill = makeCanvas(doc.width, doc.height);
+        fill.getContext('2d').drawImage(sample, -o.cloneOffset.x, -o.cloneOffset.y);
+        sample.width = 0;
+        doc.live.fill = fill;
+      } else if (kind === 'heal') {
+        doc.live.sample = sample;
+      }
+
       last = p;
       dab(doc.live.canvas.getContext('2d'), p.x, p.y);
       app.changed('pixels');
@@ -261,31 +315,65 @@ function makePaintTool(app, eraser) {
       last = null;
       if (!live) return;
       const L = doc.layers.find((l) => l.id === live.layerId);
-      const stroke = app.renderer.liveStroke(doc); // limited to the selection
+
+      if (live.mode === 'heal') {
+        const mask = app.renderer.liveStroke(doc); // limited to the selection
+        const b = live.bbox;
+        const bbox = { x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 };
+        const result = heal(live.sample, mask, bbox);
+        doc.live = null;
+        freeCanvas(live.canvas); freeCanvas(live.sample);
+        if (result) {
+          doc.checkpoint();
+          doc.editCanvas(L, 'canvas', (ctx, c) => {
+            ctx.setTransform(layerMatrix(L, c.width, c.height).inverse());
+            ctx.drawImage(result.canvas, result.x, result.y);
+          });
+        }
+        app.changed('commit');
+        return;
+      }
+
+      const content = live.target === 'mask' ? app.renderer.liveStroke(doc) : app.renderer.liveContent(doc);
       doc.live = null;
       doc.checkpoint();
       if (live.target === 'mask') {
         doc.editCanvas(L, 'mask', (ctx) => {
           ctx.globalAlpha = live.opacity;
           ctx.globalCompositeOperation = live.mode === 'hide' ? 'destination-out' : 'source-over';
-          ctx.drawImage(stroke, 0, 0);
+          ctx.drawImage(content, 0, 0);
         });
       } else {
         doc.editCanvas(L, 'canvas', (ctx, c) => {
           ctx.setTransform(layerMatrix(L, c.width, c.height).inverse());
           ctx.globalAlpha = live.opacity;
           ctx.globalCompositeOperation = live.mode === 'erase' ? 'destination-out' : 'source-over';
-          ctx.drawImage(stroke, 0, 0);
+          ctx.drawImage(content, 0, 0);
         });
       }
       freeCanvas(live.canvas);
+      freeCanvas(live.fill);
       app.changed('commit');
     },
     leave() { hoverPoint = null; app.changed('overlay'); },
     overlay(ctx) {
+      const o = app.opts;
+      if (kind === 'clone' && o.cloneSource) {
+        // a small cross shows where the copy comes from
+        const src = hoverPoint && o.cloneOffset && o.cloneAligned
+          ? { x: hoverPoint.x + o.cloneOffset.x, y: hoverPoint.y + o.cloneOffset.y }
+          : (app.doc.live && hoverPoint && o.cloneOffset ? { x: hoverPoint.x + o.cloneOffset.x, y: hoverPoint.y + o.cloneOffset.y } : o.cloneSource);
+        const s = app.toScreen(src.x, src.y);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.beginPath(); ctx.moveTo(s.x - 9, s.y); ctx.lineTo(s.x + 9, s.y); ctx.moveTo(s.x, s.y - 9); ctx.lineTo(s.x, s.y + 9); ctx.stroke();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+      }
       if (!hoverPoint) return;
       const s = app.toScreen(hoverPoint.x, hoverPoint.y);
-      const r = Math.max(2, (app.opts.size / 2) * app.scale);
+      const r = Math.max(2, (o.size / 2) * app.scale);
       ctx.lineWidth = 1;
       ctx.strokeStyle = 'rgba(0,0,0,0.8)';
       ctx.beginPath(); ctx.arc(s.x, s.y, r + 1, 0, Math.PI * 2); ctx.stroke();
@@ -458,8 +546,10 @@ export function makeTools(app) {
   return {
     move,
     crop: makeCropTool(app),
-    brush: makePaintTool(app, false),
-    eraser: makePaintTool(app, true),
+    brush: makePaintTool(app, 'brush'),
+    eraser: makePaintTool(app, 'eraser'),
+    clone: makePaintTool(app, 'clone'),
+    heal: makePaintTool(app, 'heal'),
     text: makeTextTool(app, move),
     marquee: makeShapeSelectTool(app, 'rect'),
     ellipse: makeShapeSelectTool(app, 'ellipse'),

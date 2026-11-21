@@ -39,6 +39,8 @@
       <button data-tool="crop" title="Crop (C)">⛶<span>Crop</span></button>
       <button data-tool="brush" title="Brush (B)">🖌<span>Brush</span></button>
       <button data-tool="eraser" title="Eraser (E)">⌫<span>Eraser</span></button>
+      <button data-tool="clone" title="Clone stamp (S): copy one area onto another">⎘<span>Clone</span></button>
+      <button data-tool="heal" title="Spot healing (J): remove spots and small objects">✚<span>Heal</span></button>
       <button data-tool="text" title="Text (T)">T<span>Text</span></button>
       <button data-tool="marquee" title="Rectangle selection (M)">⬚<span>Select</span></button>
       <button data-tool="ellipse" title="Ellipse selection">◯<span>Ellipse</span></button>
@@ -150,6 +152,9 @@
           <option value="image/png">PNG (best quality, keeps transparency)</option>
           <option value="image/jpeg" selected>JPEG (photos, small files)</option>
           <option value="image/webp">WebP (modern, small files)</option>
+          <option value="image/tiff">TIFF (printing, no quality loss)</option>
+          <option value="application/pdf">PDF (one page)</option>
+          <option value="image/vnd.adobe.photoshop">PSD (Photoshop, with layers)</option>
         </select>
       </label>
       <label class="field" id="export-quality-field"><span class="label">Quality <output id="export-quality-value">90</output></span>
