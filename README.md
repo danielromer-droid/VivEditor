@@ -19,12 +19,17 @@ Open a photo (or start with a blank picture), then:
 - **Selections:** Rectangle (M), Ellipse, Lasso (L), Magic wand (W). Shift adds, Alt subtracts. Then Fill, Delete, Invert or turn the selection into a mask. Brushes only paint inside the selection.
 - **Masks:** *Mask* adds a layer mask (from the selection if there is one). Tap the mask thumbnail and paint: *Hide* paints black, *Reveal* paints white.
 - **Clip:** shows a layer only where the layer below has pixels (great for putting a photo inside text).
+- **AI tools** (they run on your device; only the AI model files are downloaded the first time, from Hugging Face, then kept in the browser; your photo is never sent anywhere):
+  - **AI Select:** tap an object and it gets selected. *Add* taps more of it, *Subtract* taps what to leave out. *👤 Select subject* selects the main person. Uses SlimSAM (about 14 MB).
+  - **🤖 Remove background** (in the Properties panel of a photo layer): hides the background with a layer mask, so you can fix it by painting on the mask. Works best with people. Uses MODNet (about 7 MB).
+  - **AI Remove:** paint over something (or select it and press *🤖 AI Remove*) and it disappears, filled in by the AI. Uses MI-GAN (about 28 MB).
+  - The AI runs with [ONNX Runtime Web](https://onnxruntime.ai/) (loaded from jsDelivr). A first run takes longer while the model downloads.
 - **Undo/Redo** (Ctrl+Z / Ctrl+Shift+Z), zoom with + − 0, Ctrl + scroll or two fingers, Hand tool (H or hold Space).
 - **Export:** PNG, JPEG, WebP, TIFF, PDF or **PSD** (Photoshop, with layers, masks, blend modes and clipping; text and adjustment layers are saved as pixel layers that look the same). On a phone, *Share / Save to Photos*.
 
 Big photos are reduced to 4096 pixels (2560 on phones) on their longest side to stay fast.
 
-Code map: `photo/doc.js` (layers, undo), `photo/render.js` (stacking the layers), `photo/adjust.js` (color adjustments), `photo/tools.js` (tools), `photo/selection.js`, `photo/curves.js`, `photo/heal.js` (healing), `photo/formats.js` (TIFF, PDF, PSD; PSD uses [ag-psd](https://github.com/Agamnentzar/ag-psd), MIT, in `lib/`), `photo/photo.js` (the page).
+Code map: `photo/doc.js` (layers, undo), `photo/render.js` (stacking the layers), `photo/adjust.js` (color adjustments), `photo/tools.js` (tools), `photo/selection.js`, `photo/curves.js`, `photo/heal.js` (healing), `photo/ai.js` (AI tools), `photo/formats.js` (TIFF, PDF, PSD; PSD uses [ag-psd](https://github.com/Agamnentzar/ag-psd), MIT, in `lib/`), `photo/photo.js` (the page).
 
 ## Video editor (`video.html`)
 
